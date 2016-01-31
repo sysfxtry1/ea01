@@ -5,22 +5,24 @@
 //+------------------------------------------------------------------+
 #property copyright "sysfxtry1"
 #property link      "https://github.com/sysfxtry1/"
+#property version   "1.00"
 #property strict
 
 #define MAGICNA  2016010500
-#define UNITS	 100000					// 1ロット当たりの通貨数
+#define UNITS	 100000					 // 1ロット当たりの通貨数
 
-input int    MovingPeriodFast	= 5;    // 短期移動平均の期間
-input int    MovingPeriodSlow	= 50;   // 長期移動平均の期間
-input int    MovingShiftFast 	= 6;    // 短期移動平均のシフト数
-input int    MovingShiftSlow 	= 18;   // 長期移動平均のシフト数
-input int    StopLossCriteria	= 48;   // 損切価格の算出基準とするバー数
-input double RiskPercent		= 1;    // 許容可能なロスカット時の損失割合(%)
-input double Lots				= 0.01; // 注文量（標準：1000通貨）
-input int	 MaxOrders			= 20;	// 許容する同時注文数（ポジション含む）
-input double OrderMargin		= 0.1;  // 指値/逆指値の余裕額
-input bool	 MailAlert			= true;	// 通知メールの送信
-input bool   Debug              = false; // デバッグモード
+input int    MovingPeriodFast	= 5;     // 短期移動平均の期間
+input int    MovingPeriodSlow	= 50;    // 長期移動平均の期間
+input int    MovingShiftFast 	= 6;     // 短期移動平均のシフト数
+input int    MovingShiftSlow 	= 18;    // 長期移動平均のシフト数
+input int    StopLossCriteria	= 48;    // 損切価格の算出基準とするバー数
+input double RiskPercent		= 1;     // 許容可能なロスカット時の損失割合(%)
+input double Lots				= 0.01;  // 注文量（標準：1000通貨）
+input int	 MaxOrders			= 20;	 // 許容する同時注文数（ポジション含む）
+input double OrderMargin		= 0.1;   // 指値/逆指値の余裕額
+input bool	 MailAlert			= true;	 // 通知メールの送信のOn/Off
+input bool   Debug              = false; // デバッグモードのOn/Off
+input bool   LogSwitch          = false; // ログ出力のOn/Off
 
 //+------------------------------------------------------------------+
 //| The function of judgment the trend of the market                 |
@@ -218,6 +220,113 @@ void SendAlertMail(string OrderKind, double OrderPrice, double StopLossPrice, do
 }
 
 //+------------------------------------------------------------------+
+//| ログ取得関数　　　　　　　　　　　                               |
+//+------------------------------------------------------------------+
+void WriteLog(int TicketNo) {
+  //--- 前提条件の確認（その１）
+  // バーの始値での取引かを判定
+  static int BarBefore = 0;
+  int BarNow = Bars;
+  if( (BarNow - BarBefore) != 1) {
+    BarBefore = BarNow;
+    return;
+  }
+  BarBefore = BarNow;
+
+//  int FH = 0;
+//	string FileName = "2015log.csv";
+/*
+    FH = FileOpen(FileName, FILE_CSV|FILE_READ|FILE_WRITE, ',');
+    if(FH > 0) {
+       FileWrite(FH, 
+	     TimeYear(TC),"/",TimeMonth(TC),"/",TimeDay(TC)," ",TimeHour(TC),":",TimeMinute(TC), // 記録日時
+		 Open[0], High[0], Low[0], Close[0], // 始値, 高値, 安値, 終値
+	     iMA(NULL,0,MovingPeriodFast,MovingShiftFast,MODE_SMA,PRICE_CLOSE,0), //移動平均（短期）
+         iMA(NULL,0,MovingPeriodSlow,MovingShiftSlow,MODE_SMA,PRICE_CLOSE,0), //移動平均（長期）
+         iMACD(NULL,0,12,26,9,PRICE_CLOSE,MODE_MAIN,0),      // MACD(メイン）
+         iMACD(NULL,0,12,26,9,PRICE_CLOSE,MODE_SIGNAL,0),    // MACD（シグナル）
+         iRSI(NULL,0,14,PRICE_CLOSE,0),                      // RSI値
+         iStochastic(NULL,0,5,3,3,MODE_SMA,0,MODE_MAIN,0),   // ストキャスティクス（メイン）
+         iStochastic(NULL,0,5,3,3,MODE_SMA,0,MODE_SIGNAL,0)  // ストキャスティクス（シグナル）
+       );
+       FileClose(FH);
+    }
+*/
+
+  // 発注したポジションの情報取得
+  int      OrderOType  = 0;
+  double   OrderOPrice = 0;
+  datetime OrderOTime  = 0;
+  if (TicketNo > 0) {
+    if(OrderSelect(TicketNo, SELECT_BY_TICKET) == true) {
+      OrderOType  = OrderType();
+      OrderOPrice = OrderOpenPrice();
+      OrderOTime  = OrderOpenTime();
+    }
+  }
+
+  // 決済したポジションの情報取得
+  static int OrderTotalPre = 0;
+  int OrderTotalNow = OrdersTotal();
+  int cnt = 0;
+  string OrderCloseInfo ="";
+
+  if (OrderTotalNow < OrderTotalPre) {
+    int OrderNum = OrderTotalPre - OrderTotalNow;
+	int OrderHT  = OrdersHistoryTotal();
+
+    for (cnt = OrderHT - OrderNum; cnt == OrderHT; cnt++ ) {
+      if(OrderSelect(cnt,SELECT_BY_POS,MODE_HISTORY) == true) {
+         int OrderTypeText = OrderType();
+		 double OrderCP    = OrderClosePrice();
+		 double OrderOP    = OrderOpenPrice();
+		 double ProfitNum     = 0;
+
+		 // 損益計算
+         if (OrderTypeText == OP_BUY) 
+		   ProfitNum = (OrderCP - OrderOP) * 100000;
+		 else
+		   ProfitNum = (OrderOP - OrderCP) * 100000;
+		   
+         // 出力テキストの作成
+         OrderCloseInfo = StringConcatenate(OrderCloseInfo,",",
+		   OrderTicket(),",",
+		   OrderTypeText,",",
+		   OrderCloseTime(),",",
+		   OrderCP,",",
+		   OrderOpenTime(),",",
+		   OrderOP,",",
+		   ProfitNum,","
+         );
+      }
+    }
+  }
+  OrderTotalPre = OrderTotalNow;
+
+  // 情報出力
+  datetime TC = TimeCurrent();
+  Print("@@,",
+    TimeYear(TC),"/",TimeMonth(TC),"/",TimeDay(TC)," ",TimeHour(TC),":",TimeMinute(TC),",", // 記録日時
+    Open[0],",",  // 始値
+	High[0],",",  // 高値
+	Low[0],",",   // 安値
+	Close[0],",", // 終値
+    iMA(NULL,0,MovingPeriodFast,MovingShiftFast,MODE_SMA,PRICE_CLOSE,0),",", // 移動平均（短期）
+    iMA(NULL,0,MovingPeriodSlow,MovingShiftSlow,MODE_SMA,PRICE_CLOSE,0),",", // 移動平均（長期）
+    iMACD(NULL,0,12,26,9,PRICE_CLOSE,MODE_MAIN,0),",",      // MACD(メイン）
+    iMACD(NULL,0,12,26,9,PRICE_CLOSE,MODE_SIGNAL,0),",",    // MACD（シグナル）
+    iRSI(NULL,0,14,PRICE_CLOSE,0),",",                      // RSI値
+    iStochastic(NULL,0,5,3,3,MODE_SMA,0,MODE_MAIN,0),",",   // ストキャスティクス（メイン）
+    iStochastic(NULL,0,5,3,3,MODE_SMA,0,MODE_SIGNAL,0),",", // ストキャスティクス（シグナル）
+    TicketNo,",",                                           // チケット番号
+	OrderOType,",",                                         // 約定したポジションの種類
+	OrderOTime,",",                                         // 約定したポジションの約定時間
+	OrderOPrice,",",                                        // 約定したポジションの約定価格
+	OrderCloseInfo,","                                      // ポジションの決済情報
+  );
+}
+
+//+------------------------------------------------------------------+
 //| 許容ポジション数＋注文数の確認関数                               |
 //+------------------------------------------------------------------+
 bool CheckOrders() {
@@ -243,7 +352,8 @@ void OnTick() {
 
 	if (Debug == true) {
 		//--- バックテスト用処理（簡略化）
-		CheckForOpen();
+		int TicketNo = CheckForOpen();
+		if (LogSwitch == true) WriteLog(TicketNo);
 
 	} else {
 		//--- 本番用処理
@@ -253,7 +363,9 @@ void OnTick() {
 		if (Bars <= StopLossCriteria) return;
 
 		//--- ポジション取引
-	    if (CheckForOpen() < 0) Print("Error: Code(",GetLastError(),")");
+        int TicketNo = CheckForOpen();
+	    if (TicketNo < 0) Print("Error: Code(",GetLastError(),")");
+		if (LogSwitch == true) WriteLog(TicketNo);
 	}	
 }
 //+------------------------------------------------------------------+
